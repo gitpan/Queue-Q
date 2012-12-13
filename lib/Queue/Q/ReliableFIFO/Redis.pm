@@ -279,7 +279,7 @@ sub memory_usage_perc {
     return $mem_used * 100 / $mem_avail;
 }
 
-my %valid_options       = map { $_ => 1 } (qw(Chunk DieOnError));
+my %valid_options       = map { $_ => 1 } (qw(Chunk DieOnError MaxItems));
 my %valid_error_actions = map { $_ => 1 } (qw(drop requeue ));
 
 sub consume {
@@ -301,6 +301,7 @@ sub consume {
     my $chunk = delete $options->{Chunk} || 1;
     croak("Chunk should be a number > 0") if (! $chunk > 0);
     my $die   = delete $options->{DieOnError} || 0;
+    my $maxitems = delete $options->{MaxItems} || -1;
 
     for (keys %$options) {
         croak("Unknown option $_") if !$valid_options{$_};
@@ -318,7 +319,6 @@ sub consume {
             my $ok = eval { $callback->($item->data); 1; };
             if (!$ok) {
                 my $error = $@;
-                warn;
                 for (1 .. $MAX_RECONNECT) {    # retry if connection is lost
                     eval { $onerror->($self, $item, $error); 1; }
                     or do {
@@ -343,6 +343,7 @@ sub consume {
                     last;
                 }
             }
+            $stop = 1 if $maxitems > 0 && --$maxitems == 0;
         }
     }
     else {
@@ -362,7 +363,6 @@ sub consume {
                 }
                 else {
                     my $error = $@;
-                    warn;
                     for (1 .. $MAX_RECONNECT) {    # retry if connection is lost
                         eval { $onerror->($self, $item, $error); 1; }
                         or do {
@@ -406,6 +406,7 @@ sub consume {
                     last;
                 }
             }
+            $stop = 1 if $maxitems > 0 && ($maxitems -= $chunk) <= 0
         }
     }
 }
@@ -658,13 +659,19 @@ go to the "failed" status right away (without being requeued).
 
 =over
 
-=item B<Chunk>.  The Chunk option is used to set a chunk size
+=item * B<Chunk>.  The Chunk option is used to set a chunk size
 for number of items to claim and to mark as done in one go.
 This helps to fight latency.
 
-=item option B<DieOnError>.  
+=item * B<DieOnError>.  
 If this option has a true value, the consumer will stop when the 
 callback function returns a "die" call. Default "false".
+
+=item * B<MaxItems>
+This can be used to limit the consume method to process only a limited amount
+of items. This be useful in cases of memory leaks and restarting
+strategies with cron. Of course this comes with delays in handling the
+items.
 
 =back
 
