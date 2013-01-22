@@ -1,3 +1,0 @@
-#!/bin/sh
-perl -MQueue::Q::ReliableFIFO::CLI \
-        -e 'Queue::Q::ReliableFIFO::CLI->new->run()'
