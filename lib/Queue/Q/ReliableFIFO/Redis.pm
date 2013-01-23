@@ -110,6 +110,10 @@ sub claim_item {
         my $bq = $self->_busy_queue;
         my @items;
         my $serial;
+        if ($n > 100) {
+            my ($l) = $self->redis_conn->llen($qn);
+            $n = $l if $l < $n;
+        }
         eval {
             $conn->rpoplpush($qn, $bq, sub {
                 if (defined $_[0]) {
@@ -148,13 +152,13 @@ sub mark_item_as_done {
     my $self = shift;
     if (@_ == 1) {
         return $self->redis_conn->lrem(
-            $self->_busy_queue, 1, $_[0]->_serialized);
+            $self->_busy_queue, -1, $_[0]->_serialized);
     }
     else {
         my $conn = $self->redis_conn;
         my $count = 0;
         $conn->lrem(
-            $self->_busy_queue, 1, $_->_serialized, sub { $count += $_[0] })
+            $self->_busy_queue, -1, $_->_serialized, sub { $count += $_[0] })
                 for @_;
         $conn->wait_all_responses;
         return $count;
@@ -495,7 +499,7 @@ sub handle_expired_items {
     }
     elsif ($action eq 'drop') {
         for my $serial (@timedout) {
-            my $n = $conn->lrem( $self->_busy_queue, 1, $serial);
+            my $n = $conn->lrem( $self->_busy_queue, -1, $serial);
             push @log, Queue::Q::ReliableFIFO::Item->new(
                                 _serialized => $serial) if ($n);
         }
