@@ -13,6 +13,7 @@ lib/Queue/Q/ReliableFIFO/CLI.pm
 lib/Queue/Q/ReliableFIFO/Item.pm
 lib/Queue/Q/ReliableFIFO/Lua.pm
 lib/Queue/Q/ReliableFIFO/Redis.pm
+lua/ReliableFIFO/move_item.lua
 lua/ReliableFIFO/requeue_busy.lua
 lua/ReliableFIFO/requeue_failed.lua
 Makefile.PL
