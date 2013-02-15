@@ -7,6 +7,7 @@ use parent 'Queue::Q::ReliableFIFO';
 use Queue::Q::ReliableFIFO::Item;
 use Queue::Q::ReliableFIFO::Lua;
 use Redis;
+use Scalar::Util qw(blessed);
 use Time::HiRes;
 use Data::Dumper;
 
@@ -197,8 +198,13 @@ sub __requeue_busy  {
             $_->_serialized, 
             $self->requeue_limit,
             $place,
-            $error
-        ) for @_;
+            # NB: last item to ->call can't be undef,
+            # or you'll get "ERR Protocol error: invalid bulk length"
+            $error || '',
+        ) for map(blessed($_) && $_->isa('Queue::Q::ReliableFIFO::Item')
+                    ? $_
+                    : Queue::Q::ReliableFIFO::Item->new(data => $_),
+                  @_);
         1;
     }
     or do {
@@ -233,9 +239,21 @@ sub __requeue_item {
 }
 
 sub get_and_flush_failed_items {
-    my $self = shift;
-    my @failures = $self->raw_items_failed();
-    $self->redis_conn->del($self->_failed_queue);;
+    my ($self, %options) = @_;
+    my $min_age = delete $options{MinAge} || 0;
+    my $min_fc = delete $options{MinFailCount} || 0;
+    my $now = time();
+    die "Unsupported option(s): " . join(', ', keys %options) . "\n"
+        if (keys %options);
+    my @failures = 
+        grep { $_->time_created < ($now-$min_age) 
+                && $_->fail_count >= $min_fc }
+        $self->raw_items_failed();
+    my $conn = $self->redis_conn;
+    my $name = $self->_failed_queue;
+    $conn->multi;
+    $conn->lrem($name, -1, $_->_serialized) for (@failures);
+    $conn->exec;
     return @failures;
 }
 
@@ -353,7 +371,7 @@ sub consume {
         my $die_afterwards = 0;
         while(!$stop) {
             my $item = eval { $self->claim_item(); };
-            next if (!$item);
+            last if (!$item);   #if we don't get an item in claim_wait_timeout, exit
             my $ok = eval { $callback->($item->data); 1; };
             if (!$ok) {
                 my $error = _clean_error($@);
@@ -401,7 +419,7 @@ sub consume {
                 print "error with claim\n";
             };
             $t0 = Time::HiRes::time() if $pause; # only relevant for pause
-            next if (@items == 0);
+            last if (@items == 0);
             my @done;
             if ($process_all) {
                 # process all items in one call (option ProcessAll)
@@ -575,8 +593,8 @@ Queue::Q::ReliableFIFO::Redis - In-memory Redis implementation of the ReliableFI
   $q->flush_queue();    # get a clean state, removes queue
 
   # Consumer:
-  $q->consumer(\&callback);
-  $q->consumer(
+  $q->consume(\&callback);
+  $q->consume(
     sub { my $data = shift; print 'Received: ', Dumper($data); });
 
   # Cleanup script
@@ -717,7 +735,7 @@ the length of the queue after the items are added.
 This method is called by the consumer to consume the items of a
 queue. For each item in the queue, the callback function will be
 called. The function will receive that data of the queued item
-as parameter.
+as parameter. This method also uses B<claim_wait_timeout>.
 
 The $action parameter is applied when the callback function returns
 a "die". Allowed values are:
@@ -838,12 +856,25 @@ moved).
 Same as requeue_failed_item, but then for items in the busy state
 (hanging items?).
 
-=head2 my @raw_failed_items = $q->get_and_flush_failed_items();
+=head2 my @raw_failed_items = $q->get_and_flush_failed_items(%options);
 
 This method will read all existing failed items and remove all failed
 items right after that.
 Typical use could be a cronjob that warns about failed items
 (e.g. via email) and cleans them up.
+
+Supported options:
+
+=over 2
+
+=item * B<MaxAge> => $seconds
+Only the failed items that are older then $seconds will be retrieved and
+removed.
+
+=item * B<MinFailCount> => $n
+Only the items that failed at least $n times will be retrieved and removed.
+
+=back
 
 =head2 my $age = $q->age($queue_name [,$type]);
 
