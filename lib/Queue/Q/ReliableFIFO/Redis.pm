@@ -172,7 +172,7 @@ sub unclaim  {
 
 sub requeue_busy_item {
     my ($self, $raw) = @_;
-    return $self->__requeue_item($self->_busy_queue, $raw);
+    return $self->__requeue_busy(0, undef, $raw);
 }
 sub requeue_busy {
     my $self = shift;
@@ -192,8 +192,11 @@ sub __requeue_busy  {
     eval {
         $n += $self->{_lua}->call(
             'requeue_busy',
-            1, 
-            $self->queue_name,
+            3, 
+            $self->_busy_queue,
+            $self->_main_queue,
+            $self->_failed_queue,
+            time(),
             $_->_serialized, 
             $self->requeue_limit,
             $place,
@@ -208,28 +211,36 @@ sub __requeue_busy  {
 }
 
 sub requeue_failed_item {
-    my ($self, $raw) = @_;
-    return $self->__requeue_item($self->_failed_queue, $raw);
+    my $self = shift;
+    my $n = 0;
+    eval {
+        $n += $self->{_lua}->call(
+            'requeue_failed_item',
+            2, 
+            $self->_failed_queue,
+            $self->_main_queue,
+            time(),
+            $_->_serialized, 
+            $self->requeue_limit,
+        ) for @_;
+        1;
+    }
+    or do {
+        cluck("lua call went wrong! $@");
+    };
+    return $n;
 }
 
 sub requeue_failed_items {
     my $self = shift;
     my $limit = shift || 0;
-    my $count = 0;
     return $self->{_lua}->call(
         'requeue_failed',
-        1,
-        $self->queue_name,
-        $count);
-}
-sub __requeue_item {
-    my ($self, $from, $raw) = @_;
-    return $self->{_lua}->call(
-        'move_item',
         2,
-        $from,
+        $self->_failed_queue,
         $self->_main_queue,
-        $raw->_serialized);
+        time(),
+        $limit);
 }
 
 sub get_and_flush_failed_items {
@@ -281,7 +292,7 @@ sub age {
     return 0 if ! $serial;    # empty queue, so age 0
 
     my $item = Queue::Q::ReliableFIFO::Item->new(_serialized => $serial);
-    return time() - $item->time_created;
+    return time() - $item->time_queued;
 }
 
 sub raw_items_main {
@@ -323,7 +334,7 @@ sub memory_usage_perc {
 }
 
 my %valid_options       = map { $_ => 1 } (qw(
-    Chunk DieOnError MaxItems ProcessAll Pause ReturnWhenEmpty));
+    Chunk DieOnError MaxItems MaxSeconds ProcessAll Pause ReturnWhenEmpty));
 my %valid_error_actions = map { $_ => 1 } (qw(drop requeue ));
 
 sub consume {
@@ -346,6 +357,7 @@ sub consume {
     croak("Chunk should be a number > 0") if (! $chunk > 0);
     my $die         = delete $options->{DieOnError} || 0;
     my $maxitems    = delete $options->{MaxItems} || -1;
+    my $maxseconds  = delete $options->{MaxSeconds} || 0;
     my $pause       = delete $options->{Pause} || 0;
     my $process_all = delete $options->{ProcessAll} || 0;
     my $return_when_empty= delete $options->{ReturnWhenEmpty} || 0;
@@ -357,6 +369,7 @@ sub consume {
     for (keys %$options) {
         croak("Unknown option $_") if !$valid_options{$_};
     }
+    my $stop_time = $maxseconds > 0 ? time() + $maxseconds : 0;
 
     # Now we can start...
     my $stop = 0;
@@ -367,7 +380,8 @@ sub consume {
         while(!$stop) {
             my $item = eval { $self->claim_item(); };
             if (!$item) {
-                last if $return_when_empty;
+                last if $return_when_empty
+                            || ($stop_time > 0 && time() >= $stop_time);
                 next;    # nothing claimed this time, try again
             }
             my $ok = eval { $callback->($item->data); 1; };
@@ -397,7 +411,8 @@ sub consume {
                     last;
                 }
             }
-            $stop = 1 if $maxitems > 0 && --$maxitems == 0;
+            $stop = 1 if ($maxitems > 0 && --$maxitems == 0) 
+                            || ($stop_time > 0 && time() >= $stop_time);
         }
     }
     else {
@@ -418,7 +433,8 @@ sub consume {
             };
             $t0 = Time::HiRes::time() if $pause; # only relevant for pause
             if (@items == 0) {
-                last if $return_when_empty;
+                last if $return_when_empty
+                            || ($stop_time > 0 && time() >= $stop_time);
                 next;    # nothing claimed this time, try again
             }
             my @done;
@@ -504,7 +520,8 @@ sub consume {
                     last;
                 }
             }
-            $stop = 1 if $maxitems > 0 && ($maxitems -= $chunk) <= 0
+            $stop = 1 if ($maxitems > 0 && ($maxitems -= $chunk) <= 0)
+                            || ($stop_time > 0 && time() >= $stop_time);
         }
     }
 }
@@ -745,10 +762,10 @@ a "die". Allowed values are:
 
 By default, the consume method will keep on reading the queue forever or
 until the process receives a SIGINT or SIGTERM signal. You can make the
-consume method return ealier by using one of the options MaxItems or
-ReturnWhenEmpty. If you still want to have a "near real time" behavior
-you need to make sure there are always consumers running, which can be
-achived using cron and IPC::ConcurrencyLimit::WithStandby.
+consume method return ealier by using one of the options MaxItems,
+MaxSeconds or ReturnWhenEmpty. If you still want to have a "near real time"
+behavior you need to make sure there are always consumers running,
+which can be achived using cron and IPC::ConcurrencyLimit::WithStandby.
 
 This method also uses B<claim_wait_timeout>.
 
@@ -788,6 +805,10 @@ of items, which can be useful in cases of memory leaks. When you use
 this option, you will probably need to look into restarting 
 strategies with cron. Of course this comes with delays in handling the
 items.
+
+=item * B<MaxSeconds>
+This can be used to limit the consume method to process items for a limited
+amount of time.
 
 =item * B<ReturnWhenEmpty>
 Use this when you want to let consume() return when the queue is empty.
@@ -844,9 +865,9 @@ requeue_limit times.
 
 =head2 my $count = $q->unclaim(@items)
 
-This puts claimed items back to the queue.
-It is pushed to the front
-of the queue so that it can be picked up a.s.a.p. This method is e.g. be used
+This method puts the items that are passed, back to the queue
+at the consumer side,
+so that they can be picked up a.s.a.p. This method is e.g. be used
 when a chunk of items are claimed but the consumer aborts before all
 items are processed.
 
@@ -864,7 +885,7 @@ working queue. The $limit parameter is optional and can be used to move
 only a subset to the working queue.
 The number of items actually moved will be the return value.
 
-=head2 my $count = $q->requeue_failed_item($raw_item)
+=head2 my $count = $q->requeue_failed_item(@raw_items)
 
 This method will move the specified item to the main queue so that it
 will be processed again. It will return 0 or 1 (i.e. the number of items
@@ -872,8 +893,7 @@ moved).
 
 =head2 my $count = $q->requeue_busy_item($raw_item)
 
-Same as requeue_failed_item, but then for items in the busy state
-(hanging items?).
+Same as requeue_busy, it only accepts one value instead of a list.
 
 =head2 my @raw_failed_items = $q->get_and_flush_failed_items(%options);
 
@@ -899,8 +919,10 @@ If both options are used, only one of the two needs to be true to retrieve and r
 
 =head2 my $age = $q->age($queue_name [,$type]);
 
-This methods returns the age (in seconds) of the oldest item in the queue.
-The second parameter ($type) is optional and can be main (default)
+This methods returns maximum wait time of items in the queue. This
+method will simply lookup the item in the head of the queue (i.e.
+at the comsumer side of the queue) and will return the age of that item.
+So this is a relatively cheap method.
 
 =head2 my @raw_items = $q->raw_items_busy( [$max_number] );
 
