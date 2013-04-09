@@ -76,6 +76,12 @@ sub new {
     return $self;
 }
 
+sub clone {
+    my ($class, $org, %params) = @_;
+    my %default = map { $_, $org->{$_} } grep { m/^[a-zA-Z]/ } keys %$org;
+    return $class->new( %default, %params);
+}
+
 sub enqueue_item {
     my $self = shift;
     return if not @_;
@@ -361,9 +367,9 @@ sub consume {
     my $pause       = delete $options->{Pause} || 0;
     my $process_all = delete $options->{ProcessAll} || 0;
     my $return_when_empty= delete $options->{ReturnWhenEmpty} || 0;
-    croak("Option ProcessAll without Chunks does not make sense")
+    croak("Option ProcessAll without Chunk does not make sense")
         if $process_all && $chunk <= 1;
-    croak("Option Pause does without Chunks does not make sense")
+    croak("Option Pause without Chunk does not make sense")
         if $pause && $chunk <= 1;
 
     for (keys %$options) {
@@ -567,13 +573,18 @@ sub handle_expired_items {
         }
     }
 
-    # put in the items of older scans that did not timeout
-    my %timedout = map { $_ => undef } @timedout;
+    # We create a new timetable. We take the original timetable and
+    # exclude:
+    # 1. the busy items which timed out and we just handled
+    # 2. timetable items which have no corresponding busy items anymore
+    my %timedout = map { $_ => undef } @timedout; 
+    my %busy = map { $_ => undef } @serial;
     my %newtimetable = 
         map  { $_ => $timetable{$_} } 
-        grep { ! exists $timedout{$_} }
-        keys %timetable;
-    # put in the items of latest scan that did not timeout
+        grep { exists $busy{$_} }        # exclude (ad 2.)
+        grep { ! exists $timedout{$_} }  # exclude (ad 1.)
+        keys %timetable;                 # original timetable
+    # put in the items of latest scan we did not see before
     $newtimetable{$_} = $time 
         for (grep { !exists $newtimetable{$_} } @serial);
     $conn->multi;
@@ -600,6 +611,12 @@ Queue::Q::ReliableFIFO::Redis - In-memory Redis implementation of the ReliableFI
       server     => 'myredisserver',
       port       => 6379,
       queue_name => 'my_work_queue',
+  );
+
+  # reuse same connection and create a new object for another queue
+  # Note: don't use the same connection in different threads (of course)!
+  my $q2 = Queue::Q::ReliableFIFO::Redis->clone(
+      $q, queue_name => 'other_queue'
   );
 
   # Producer:
@@ -742,6 +759,11 @@ Method, typically done by a cronjob).
 C<Default value is 30>.
 
 =back
+
+=head2 clone($q, %options)
+
+The clone method can be use to use the default (and existing connection)
+to create another queue object.
 
 =head2 enqueue_item(@items)
 
