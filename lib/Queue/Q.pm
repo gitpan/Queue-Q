@@ -4,7 +4,7 @@ use 5.008001;
 use strict;
 use warnings;
 
-our $VERSION = '0.17';
+our $VERSION = '0.18';
 
 1;
 __END__
@@ -19,16 +19,16 @@ Queue::Q - Mix-and-match Queue Implementations and Backends
   
   # Very primitive FIFO queue (abstract interface)
   use Queue::Q::NaiveFIFO;
-  # ... and it's pure-Perl, in-memory implementation
+  # ... and its pure-Perl, in-memory implementation
   use Queue::Q::NaiveFIFO::Perl;
-  # ... it's Redis-based implementation
+  # ... its Redis-based implementation
   use Queue::Q::NaiveFIFO::Redis;
   
   # "Reliable" enqueue, claim, mark-as-done FIFO queue:
   use Queue::Q::ClaimFIFO; # abstract interface
-  # ... and again, it's pure-Perl, in-memory implementation
+  # ... and again, its pure-Perl, in-memory implementation
   use Queue::Q::ClaimFIFO::Perl;
-  # ... and it's Redis-based implementation
+  # ... and its Redis-based implementation
   use Queue::Q::ClaimFIFO::Redis;
   
   # A composite, distributed queue, built from shards of
@@ -107,7 +107,7 @@ of Redis each sustained 800k-1M transactions per second with a naive-type
 distributed queue. C<DistFIFO> has not been tested with the C<ReliableFIFO>
 implementation as building blocks yet!
 
-=head1 ACKNLOWLEDGMENT
+=head1 ACKNOWLEDGMENT
 
 This module was originally developed for Booking.com.
 With approval from Booking.com, this module was generalized
