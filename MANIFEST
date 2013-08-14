@@ -37,5 +37,4 @@ t/lib/Queue/Q/TestClaimFIFO.pm
 t/lib/Queue/Q/TestDistFIFO.pm
 t/lib/Queue/Q/TestNaiveFIFO.pm
 t/lib/Queue/Q/TestReliableFIFO.pm
-META.yml                                 Module YAML meta-data (added by MakeMaker)
-META.json                                Module JSON meta-data (added by MakeMaker)
+META.yml                                 Module meta-data (added by MakeMaker)
