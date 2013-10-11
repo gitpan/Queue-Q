@@ -14,12 +14,16 @@ lib/Queue/Q/ReliableFIFO/Item.pm
 lib/Queue/Q/ReliableFIFO/Lua.pm
 lib/Queue/Q/ReliableFIFO/Redis.pm
 lua/ReliableFIFO/mkinclude.pl
+lua/ReliableFIFO/move_item.lua
+lua/ReliableFIFO/remove_failed_gentle.lua
 lua/ReliableFIFO/requeue_busy.lua
 lua/ReliableFIFO/requeue_failed.lua
+lua/ReliableFIFO/requeue_failed_gentle.lua
 lua/ReliableFIFO/requeue_failed_item.lua
 Makefile.PL
 MANIFEST			This list of files
 MANIFEST.SKIP
+Queue-Q-0.09.tar.gz
 README
 scripts/fifo-cli
 scripts/nagios-redis-memory-usage.pl
@@ -37,4 +41,5 @@ t/lib/Queue/Q/TestClaimFIFO.pm
 t/lib/Queue/Q/TestDistFIFO.pm
 t/lib/Queue/Q/TestNaiveFIFO.pm
 t/lib/Queue/Q/TestReliableFIFO.pm
-META.yml                                 Module meta-data (added by MakeMaker)
+META.yml                                 Module YAML meta-data (added by MakeMaker)
+META.json                                Module JSON meta-data (added by MakeMaker)
