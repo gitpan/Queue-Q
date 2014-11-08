@@ -22,6 +22,7 @@ lua/ReliableFIFO/requeue_failed_item.lua
 Makefile.PL
 MANIFEST			This list of files
 MANIFEST.SKIP
+Queue-Q-0.24.tar.gz
 README
 scripts/fifo-cli
 scripts/nagios-redis-memory-usage.pl

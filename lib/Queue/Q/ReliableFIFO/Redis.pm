@@ -391,13 +391,13 @@ sub queue_length {
 
 sub peek_item {
     my ($self, $type) = @_;
-    # this function returns age of oldest item in the queue (in seconds)
+    # this function returns the value of oldest item in the queue
     __validate_type(\$type);
     my $qn = $self->queue_name . "_$type";
 
     # take oldest item
     my ($serial) = $self->redis_conn->lrange($qn,-1,-1);
-    return undef if ! $serial;    # empty queue, so age 0
+    return undef if ! $serial;    # empty queue
 
     my $item = Queue::Q::ReliableFIFO::Item->new(_serialized => $serial);
     return $item->data();
@@ -481,7 +481,7 @@ SCOPE: {
         my $onerror = $error_subs{$error_action}
             || croak("no handler for $error_action");
 
-        $options ||= {};
+        $options = $options ? {%$options} : {};
         my $chunk       = delete $options->{Chunk} || 1;
         croak("Chunk should be a number > 0") if (! $chunk > 0);
         cluck("DieOnError is deprecated, use ReturnOnDie instead")
@@ -521,6 +521,8 @@ SCOPE: {
 
         if ($chunk == 1) {
             my $die_afterwards = 0;
+            my $claimed_count;
+            my $done_count;
             while(!$stop) {
                 my $item = eval { $self->claim_item(); };
                 if (!$item) {
@@ -528,6 +530,7 @@ SCOPE: {
                                 || ($stop_time > 0 && time() >= $stop_time);
                     next;    # nothing claimed this time, try again
                 }
+                $claimed_count++;
                 my $ok = eval { $callback->($item->data); 1; };
                 if (!$ok) {
                     my $error = _clean_error($@);
@@ -546,8 +549,10 @@ SCOPE: {
                     }
                 } else {
                     for (1 .. $MAX_RECONNECT) {    # retry if connection is lost
-                        eval { $self->mark_item_as_done($item); 1; }
-                        or do {
+                        eval {
+                            $done_count += $self->mark_item_as_done($item);
+                            1;
+                        } or do {
                             last if $stop;
                             sleep 1;
                             next;
@@ -558,6 +563,9 @@ SCOPE: {
                 $stop = 1 if ($maxitems > 0 && --$maxitems == 0)
                                 || ($stop_time > 0 && time() >= $stop_time);
             }
+            my $still_busy = $claimed_count - $done_count;
+            warn "not all items removed from busy queue ($still_busy)\n"
+                if $still_busy;
         }
         else {
             my $die_afterwards = 0;
